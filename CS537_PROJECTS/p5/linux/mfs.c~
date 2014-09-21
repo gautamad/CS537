@@ -1,0 +1,162 @@
+#include "mfs.h"
+#include "udp.h"
+#include <string.h>
+
+struct sockaddr_in saddr;
+int sd;
+
+
+int MFS_Init(char *hostname, int port)
+{
+ sd = UDP_Open(0);
+ assert(sd > -1);
+ int rc = UDP_FillSockAddr(&saddr, "mumble-13.cs.wisc.edu", port);
+ assert(rc == 0);
+return 0;
+}
+
+int MFS_Lookup(int pinum, char *name)
+{
+ int *temp1,temp;
+ MFS_Client_Msg clientmsg;
+  MFS_Client_Msg servermsg;
+ clientmsg.pinum = pinum;
+ clientmsg.inum = -1;
+ clientmsg.block_offset = -1;
+ clientmsg.msg_type = LOOKUP;
+ clientmsg.port = -1;
+ clientmsg.file_type = -1;
+ strcpy(clientmsg.name,name); 
+ strcpy(clientmsg.buffer,"-1\0");
+ int rc = UDP_Write(sd, &saddr, (char *) &clientmsg , sizeof(clientmsg));
+  
+ if (rc > 0) {
+ struct sockaddr_in raddr;
+ rc = UDP_Read(sd, &raddr,(char*) &servermsg,sizeof(servermsg));
+ }
+ if(servermsg.ret_val == 0)
+ return servermsg.inum;
+ else
+ return -1;
+}
+
+int MFS_Stat(int inum, MFS_Stat_t *m)
+{
+ MFS_Client_Msg clientmsg;
+  MFS_Client_Msg servermsg;
+ clientmsg.pinum = -1;
+ clientmsg.inum = inum;
+ clientmsg.block_offset = -1;
+ clientmsg.msg_type = STAT;
+ clientmsg.port = -1;
+ clientmsg.file_type = -1;
+ strcpy(clientmsg.name,"\0");
+ strcpy(clientmsg.buffer,"-1\0");
+ int rc = UDP_Write(sd, &saddr, (char *) &clientmsg , sizeof(clientmsg));
+
+ if (rc > 0) {
+  struct sockaddr_in raddr;
+  int rc = UDP_Read(sd, &raddr,(char*)&servermsg,sizeof(servermsg));
+  *m = servermsg.stat;
+  }
+ if(rc > 0)
+  return servermsg.ret_val;
+ else 
+  return -1;
+
+}
+
+
+int MFS_Write(int inum, char *buffer, int block)
+{
+MFS_Client_Msg clientmsg;
+ clientmsg.pinum = -1;
+ clientmsg.inum = inum;
+ clientmsg.block_offset = block;
+ clientmsg.msg_type = WRITE;
+ clientmsg.port = -1;
+ clientmsg.file_type = -1;
+ strcpy(clientmsg.name,"\0");
+ strcpy(clientmsg.buffer, buffer);
+ int rc = UDP_Write(sd, &saddr, (char *) &clientmsg , sizeof(clientmsg));
+return 0;
+ 
+}
+
+int MFS_Read(int inum, char *buffer, int block)
+{
+MFS_Client_Msg clientmsg;
+ clientmsg.pinum = -1;
+ clientmsg.inum = inum;
+ clientmsg.block_offset = block;
+ clientmsg.msg_type = READ;
+ clientmsg.port = -1;
+ clientmsg.file_type = -1;
+ strcpy(clientmsg.name,"\0");
+ strcpy(clientmsg.buffer,buffer);
+ int rc = UDP_Write(sd, &saddr, (char *) &clientmsg , sizeof(clientmsg));
+return 0;
+}
+
+int MFS_Creat(int pinum, int type, char *name)
+{
+ MFS_Client_Msg clientmsg;
+ clientmsg.pinum = pinum;
+ clientmsg.inum = -1;
+ clientmsg.block_offset = -1;
+ clientmsg.msg_type = CREAT;
+ clientmsg.port = -1;
+ clientmsg.file_type = type;
+ strcpy(clientmsg.name,name);
+ strcpy(clientmsg.buffer,"-1\0");
+ int rc = UDP_Write(sd, &saddr, (char *) &clientmsg , sizeof(clientmsg));
+return 0;
+}
+
+
+int MFS_Unlink(int pinum, char *name)
+{
+ MFS_Client_Msg clientmsg;
+ clientmsg.pinum = pinum;
+ clientmsg.inum = -1;
+ clientmsg.block_offset = -1;
+ clientmsg.msg_type = UNLINK;
+ clientmsg.port = -1;
+ clientmsg.file_type = -1;
+ strcpy(clientmsg.name,name);
+ strcpy(clientmsg.buffer,"-1\0");
+ int rc = UDP_Write(sd, &saddr, (char *) &clientmsg , sizeof(clientmsg));
+return 0;
+}
+
+int MFS_Shutdown()
+{
+ MFS_Client_Msg clientmsg;
+ clientmsg.pinum = -1;
+ clientmsg.inum = -1;
+ clientmsg.block_offset = -1;
+ clientmsg.msg_type = SHUTDOWN;
+ clientmsg.port = -1;
+ clientmsg.file_type = -1;
+ strcpy(clientmsg.name,"\0");
+ strcpy(clientmsg.buffer,"-1\0");
+ int rc = UDP_Write(sd, &saddr, (char *) &clientmsg , sizeof(clientmsg));
+return 0;
+}
+
+
+
+int main()
+{
+int val;
+MFS_Stat_t *m = (MFS_Stat_t *)malloc(sizeof(MFS_Stat_t));
+char dum[4096] = "sss\0";
+MFS_Init(dum,6000);
+MFS_Stat(1,m);
+MFS_Creat(0,1,dum);
+val = MFS_Lookup(0, dum);
+printf(" inode num = %d \n",val);
+MFS_Shutdown();
+return 0;
+}
+

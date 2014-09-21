@@ -1,0 +1,449 @@
+#include <stdio.h>
+#include "udp.h"
+#include "mfs.h"
+#define BUFFER_SIZE (4096)
+
+void Server_Diskcreate();
+void Server_Diskread();
+int Server_Lookup(int,char *);
+int Server_Creat(int pinum, int type,char* name);
+int Server_Write(int inum, char *buffer, int block);
+int Server_Read(int inum, char *buffer, int block);
+int Server_Shutdown();
+int Server_Unlink(int pinum,char *name);
+int Server_Stat(int inum, MFS_Stat_t *m);
+
+MFS_Client_Msg servermsg;
+
+MFS_CheckPt checkpt;
+MFS_InodeMap inodemap;
+MFS_InodeDirEnt rootdir;
+MFS_Inode rootinode;
+MFS_Mem_InodeMap meminodemap;
+
+int fd;
+char name[10]="lol\0";
+char buffer[4096] ="HEHEHEHEHHEHEHE\0";
+char temp_buffer[4096];
+int main(int argc, char *argv[]) {
+    int port; 
+    MFS_Stat_t *m = (MFS_Stat_t *)malloc(sizeof(MFS_Stat_t));
+    MFS_Client_Msg clientmsg;
+    port = atoi(argv[1]);
+    printf("The port number is %d\n", port);
+    fd = open(argv[2], O_RDWR);
+    if(fd < 0)
+      {
+    	fd = open(argv[2], O_CREAT|O_RDWR|O_TRUNC, S_IRWXU);
+    	if(fd < 0)
+	  {
+	    printf("Cannot open or create the file");
+	  }
+	else
+	  Server_Diskcreate();
+      }
+    else
+      Server_Diskread();
+    
+   // Server_Creat(0,1,name);
+    //Server_Unlink(0,name);
+    //Server_Write(1,buffer,0);   
+    int sd = UDP_Open(port);
+      assert(sd > -1);
+    
+	printf(" SERVER:: waiting in loop\n");
+	
+    while (1) {
+    struct sockaddr_in s;
+
+    int rc = UDP_Read(sd, &s, (char *)&clientmsg,sizeof(MFS_Client_Msg));
+    if(rc > 0) {
+    printf("Received a msg %d\n", clientmsg.msg_type);
+
+/*********** LOOKUP REQUEST *************/
+
+    if(clientmsg.msg_type == 1)
+	{
+	int rc;
+         rc = Server_Lookup(clientmsg.pinum, clientmsg.name);
+         if(rc == -1)
+	 {
+	  servermsg.ret_val = -1;
+	 }
+	 else
+	 {
+	  servermsg.ret_val = 0;
+	  servermsg.inum = rc;
+          UDP_Write(sd, &s,(char*) &servermsg,sizeof(servermsg)); 
+	}
+	}
+/************* STAT REQUEST *************/
+    else if(clientmsg.msg_type == 2)
+	{
+          int rc;
+          rc = Server_Stat(clientmsg.inum, m);
+          servermsg.ret_val = rc;
+	  servermsg.stat = *m;
+	  
+        }
+
+    else if(clientmsg.msg_type == 3)
+	Server_Write(clientmsg.inum, clientmsg.buffer, clientmsg.block_offset);
+    else if(clientmsg.msg_type == 4)
+	Server_Read(clientmsg.inum,temp_buffer,clientmsg.block_offset);
+    else if(clientmsg.msg_type == 5)
+ 	Server_Creat(clientmsg.pinum,clientmsg.file_type,clientmsg.name);
+    else if(clientmsg.msg_type == 6)
+	Server_Unlink(clientmsg.pinum,clientmsg.name);
+    else if(clientmsg.msg_type == 7)
+        Server_Shutdown();
+    
+    }
+}
+      
+    return 0;
+}
+/***********************************INITIAL  FUNCTIONS***********************************/
+//Read all disk file pointers
+void Server_Diskread()
+{
+  int count=0,i,j=0;
+  
+  lseek(fd,0,SEEK_SET);
+  read(fd, &checkpt, sizeof(checkpt));
+
+  for(i=0; i<256; i++)
+    {
+     if(checkpt.InodeMap[i] >= 0)
+       {
+	 lseek(fd,checkpt.InodeMap[i],0);
+	 read(fd,&inodemap,sizeof(MFS_InodeMap));
+	 for(j = 0; j<16; j++)
+	   {
+	     if(inodemap.Inodes[j])
+	       {
+		 meminodemap.allinodes[count] = inodemap.Inodes[j];
+		 count++;
+	       }
+	   }
+       }
+    }
+}
+
+//Initialize the file system
+
+void Server_Diskcreate() 
+{
+  int i; 
+  
+  
+  for(i = 0; i < 256; i++) 
+    {
+      checkpt.InodeMap[i] = -1;
+    }
+  
+  lseek(fd, 0, 0);
+  checkpt.InodeMap[0] = sizeof(checkpt) + sizeof(rootinode) + sizeof(rootdir);
+  checkpt.log = sizeof(checkpt) + sizeof(rootinode) + sizeof(rootdir)  + sizeof(inodemap);
+  write(fd, &checkpt, sizeof(checkpt));
+  
+  printf("Checkpoint[0] = %d\n",checkpt.InodeMap[0]);
+  
+  for(i=0; i< 4096;i++)
+    meminodemap.allinodes[i]  = -1 ;
+
+
+  for(i = 0; i< 14; i++)
+    {
+      rootinode.BlockPointer[i] = -1;
+    }
+  
+  rootinode.stat.type = 0;
+  rootinode.stat.size = MFS_BLOCK_SIZE;
+  
+  rootinode.BlockPointer[0] = sizeof(checkpt) + sizeof(rootinode);
+  write(fd, &rootinode, sizeof(rootinode));
+  
+  // printf("Blockpointer[0] = %d\n", rootinode.BlockPointer[0]);     
+ 
+  for(i = 0; i < 64; i++)
+    {
+  	strcpy(rootdir.DirEnt[i].name,"\0");
+	rootdir.DirEnt[i].inum = -1;
+    }
+  
+  strcpy(rootdir.DirEnt[0].name,".\0");
+  strcpy(rootdir.DirEnt[1].name,"..\0");
+  
+  rootdir.DirEnt[0].inum = 0;
+  rootdir.DirEnt[1].inum = 0;
+   
+  write(fd, &rootdir, sizeof(rootdir));
+
+ for(i= 0; i < 16; i++) 
+    {
+      inodemap.Inodes[i] = -1;
+    }
+  inodemap.Inodes[0] = sizeof(checkpt);
+  write(fd, &inodemap, sizeof(MFS_InodeMap));
+
+  printf("Inodemap[0] = %d\n", inodemap.Inodes[0]);
+
+  /* lseek(fd,4,0);
+  read(fd,&buf,4);
+  int buf1, buf2;
+  lseek(fd,buf,0);
+  read(fd,&buf1,4);
+  lseek(fd,buf1+4,0);
+  read(fd,&buf2,4);
+  
+  printf("value of buf = %d\n",buf); 
+printf("value in imap for inode location is %d\n", buf1);
+printf("value in inode %d\n", buf2);*/
+}
+
+
+
+/********************************* FUNCTIONS FOR CLIENT REQUEST *************************************/
+
+int Server_Lookup(int pinum, char *name)
+{
+int buf,i;
+Server_Diskread();
+buf = meminodemap.allinodes[pinum];
+lseek(fd,buf,0);
+MFS_Inode inode; 
+MFS_InodeDirEnt inodedirent;
+read(fd,&inode,sizeof(inode));
+lseek(fd,inode.BlockPointer[0],0);
+read(fd,&inodedirent, sizeof(inodedirent));
+for(i=0;i<64;i++)
+{
+if(!strcmp(inodedirent.DirEnt[i].name, name))
+{
+return inodedirent.DirEnt[i].inum;
+}
+}
+return -1;
+}
+ 
+
+ int Server_Creat(int pinum, int type, char *name)
+ {
+   int buf, temp, chkptendlog, newinodenum,pinodedirent,i;
+   Server_Diskread();
+   buf = meminodemap.allinodes[pinum];
+   MFS_Inode pinode;
+   lseek(fd, buf, 0);
+   read(fd, &pinode, sizeof(pinode));
+   if(pinode.stat.type == 0)
+     {
+       chkptendlog = checkpt.log;
+       
+       
+       MFS_Inode newinode;
+       
+       for(i=0; i < 4096;i++)
+	 {
+	   if(meminodemap.allinodes[i] ==-1)
+	     {
+	       newinodenum = i;
+	       break;
+	     }
+	 }
+       
+       pinodedirent = pinode.BlockPointer[0];
+       lseek(fd,pinodedirent,0);
+       
+       MFS_InodeDirEnt mfsinodedirent;
+       
+       read(fd, &mfsinodedirent, sizeof(mfsinodedirent));
+       
+       for(i=0; i<896; i++)
+	 {
+	   if(mfsinodedirent.DirEnt[i].inum == -1)
+	     {
+	       strcpy(mfsinodedirent.DirEnt[i].name,name);
+	       mfsinodedirent.DirEnt[i].inum = newinodenum;
+	       break;
+	     }
+	 }
+       
+       
+       lseek(fd,pinodedirent,0);
+       write(fd, &mfsinodedirent, sizeof(mfsinodedirent));
+       
+       temp = checkpt.InodeMap[0];
+       lseek(fd,temp,0);
+       MFS_InodeMap pinodemap;
+       read(fd, &pinodemap, sizeof(pinodemap));
+       
+       for(i=0; i<16;i++)
+       {
+	 if(pinodemap.Inodes[i] == -1)
+	   {
+	     pinodemap.Inodes[i] = chkptendlog;
+	     break;
+	   }
+       }
+       lseek(fd,temp,0);
+       write(fd,&pinodemap,sizeof(pinodemap));
+       if(type == 1)
+	 {
+	   MFS_DataBlock newdatablock;
+	   newinode.stat.size = 0;
+	   newinode.stat.type = type;
+	   
+	   for(i=0;i<14;i++)
+	     newinode.BlockPointer[i] = -1;
+
+	   lseek(fd,chkptendlog,0);
+	   write(fd, &newinode, sizeof(newinode));
+           
+ 	   for(i=0;i<14;i++){
+	   strcpy(newdatablock.DataBlock,"\0");
+	   write(fd, &newdatablock, MFS_BLOCK_SIZE);
+           }
+	   checkpt.log = checkpt.log + sizeof(newinode)+14*MFS_BLOCK_SIZE;
+	   
+	   
+	   lseek(fd,0,0);
+	   write(fd,&checkpt, sizeof(checkpt));
+	 }
+       else
+	 {
+	   MFS_InodeDirEnt parentdir;
+	   newinode.stat.size = 4096;
+	   newinode.stat.type = type;
+
+	   for(i=0;i<14;i++)
+	     newinode.BlockPointer[i] = -1;
+	   
+	   
+	   lseek(fd,chkptendlog,0);
+	   newinode.BlockPointer[0]=chkptendlog + sizeof(newinode);
+	   write(fd, &newinode, sizeof(newinode));
+	   for(i = 0; i < 64; i++)
+	     {
+	       strcpy(parentdir.DirEnt[i].name,"\0");
+	       parentdir.DirEnt[i].inum = -1;
+	     }
+	   
+	   strcpy(parentdir.DirEnt[0].name,".\0");
+	   strcpy(parentdir.DirEnt[1].name,"..\0");
+	   
+	   parentdir.DirEnt[0].inum = newinodenum;
+	   parentdir.DirEnt[1].inum = pinum;
+	   write(fd, &parentdir, sizeof(parentdir));
+	   lseek(fd,0,0);
+	   checkpt.log = checkpt.log + sizeof(newinode)+sizeof(parentdir);
+	   write(fd,&checkpt, sizeof(checkpt));
+	 }	
+       
+     }
+return 0;
+ }
+
+int Server_Write(int inum, char *buffer, int block)
+{
+int buf,endlog,imapno, imapoffset,imaploc;
+Server_Diskread();
+buf = meminodemap.allinodes[inum];
+imapno = inum/16;
+imapoffset = inum%16;
+MFS_Inode inode;
+MFS_InodeMap inodemap;
+if(inode.stat.type == 0) // Directory and not a file
+return -1;
+else
+{
+endlog = checkpt.log;
+imaploc = checkpt.InodeMap[imapno];
+lseek(fd,imaploc,0);
+read(fd, &inodemap, sizeof(inodemap)); // Read Imap into memory
+lseek(fd, buf, 0);
+read(fd, &inode, sizeof(inode)); // Read Inode into memory
+inode.stat.size = inode.stat.size + MFS_BLOCK_SIZE;
+inode.BlockPointer[block] = endlog + sizeof(inode);
+inodemap.Inodes[imapoffset] = endlog;
+lseek(fd,endlog,0);
+write(fd, &inode, sizeof(inode));
+write(fd, buffer, MFS_BLOCK_SIZE);
+write(fd, &inodemap, sizeof(inodemap));
+checkpt.InodeMap[imapno] = endlog+sizeof(inode)+MFS_BLOCK_SIZE;
+checkpt.log = endlog+sizeof(inode)+MFS_BLOCK_SIZE+sizeof(inodemap);
+lseek(fd,0,0);
+write(fd, &checkpt, sizeof(checkpt));
+}
+
+
+fsync(fd);
+return 0;
+}
+
+int Server_Read(int inum, char *buffer, int block)
+{
+int buf;
+Server_Diskread();
+buf = meminodemap.allinodes[inum];
+
+MFS_Inode inode;
+lseek(fd,buf,0);
+read(fd,&inode,sizeof(inode));
+
+if(inode.BlockPointer[block] == -1)
+return -1;
+
+lseek(fd,inode.BlockPointer[block],0);
+read(fd,buffer,MFS_BLOCK_SIZE);
+return 0;
+}
+
+int Server_Unlink(int pinum, char *name)
+{
+int buf,i;
+MFS_InodeDirEnt inodedirent;
+MFS_Inode inode;
+Server_Diskread();
+buf = meminodemap.allinodes[pinum];
+lseek(fd,buf,0);
+read(fd,&inode,sizeof(inode));
+lseek(fd,inode.BlockPointer[0],0);
+read(fd, &inodedirent, sizeof(inodedirent));
+for(i=0; i<64; i++)
+{
+if(!strcmp(inodedirent.DirEnt[i].name,name))
+{
+strcpy(inodedirent.DirEnt[i].name,"\0");
+inodedirent.DirEnt[i].inum = -1;
+break;
+}
+}
+lseek(fd,inode.BlockPointer[0],0);
+write(fd, &inodedirent, sizeof(inodedirent));
+
+fsync(fd);
+return 0;
+}
+
+int Server_Shutdown()
+{
+printf("inside server shutdown \n");
+fsync(fd);
+exit(0);
+}
+
+int Server_Stat(int inum, MFS_Stat_t *m)
+{
+printf("inside server stat\n");
+int buf;
+Server_Diskread();
+buf = meminodemap.allinodes[inum];
+lseek(fd,buf,0);
+MFS_Inode inode; 
+read(fd,&inode,sizeof(inode));
+*m=inode.stat;
+return 0;
+}
+
+

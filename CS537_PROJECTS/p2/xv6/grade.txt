@@ -1,0 +1,8 @@
+User:    dineshba
+Partner: dhanabal
+Test build 1
+Test settickets 1
+Test getpinfo 1
+Test getpinfo2 1
+Test ticks 0
+Overall 4 of 5

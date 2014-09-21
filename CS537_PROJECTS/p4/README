@@ -1,0 +1,33 @@
+Team Members:
+Dineshbabu Selvaraju (dineshba@cs.wisc.edu)
+Gautam Dhanabalan (dhanabal@cs.wisc.edu)	
+
+Project 4a: Scalable Web Server
+Modeled as a Producer-Consumer problem with Producer being the one getting and insering the requests into the buffer and Consumer being the getting the requests from the buffer and serving the requesting/returning the response.
+1)The number of threads and the buffer length is specified via command line arguments.
+2)Producer whenever it gets a request checks for the length of buffer and inserts the connfd into the buffer if any empty slot is available
+  and signals the consumers.
+3)Consumer(Worker threads) check whether any request is present in the buffer. If the buffer is empty it goes to sleep till it is signalled by the producer. Once it is woken up by the Producer, it gets request from the buffer based on the algorithm (FIFO,SFF,SFNF) specified in the command line arguments.
+4)Now getting the request from the buffer, the respective worker threads handles the request and return the response.
+
+Project 4b: xv6 Threads
+
+1) Clone System call: Clone system call was declared in required header files and defined in proc.c. The clone system call creates a thread by sharing the address space of the parent and allocating a page size stack on the parent process heap. The checks performed in clone are if the address of the stack is page aligned and if the fucntion address is valid. 
+
+2) Join system call: Join system call is used to wait for a particular thread. We loop through the process table to find a thread which has the same page directory address as the process and checks the state of the thread. It spin waits till the thread turns state to zombie(i.e it finished execution) and makes the thread UNUSED. 
+
+3) Phtread_create: User program calls pthread_create to create a thread. This function takes in the function address and function argument address arguments. It calls malloc to allocate memory on the heap for the stack, page aligns it and calls clone system call to create the thread.
+
+4)Pthread_join: User program calls pthread_join to wait for a thread. Pthread_join calls the join system call to get the pid of the waited for thread and the stack address. It then frees the stack memory to avoid memory leak.
+
+5)lock_acquire: We declare a struct lock_t in user.h to hold the lock(flag) variable. It uses xchg x86 atomic operation to atomically increment and reutrn the lock variable.
+
+6)lock_release: Release the lock atomically using the xchg x86 instruction
+
+7)lock_init: Initializes the lock to value 0.
+
+8)cv_wait:
+  Conditional variable is a pointer to the head of a linked listt. Each node of the linked list is a structure which contains a pointer to a process structure and the link to the next structure in the list. Whenever a thread calls cv_wait, a node(structure) is created(using malloc) and linked to the list at the top and the cond variable is updated with the address of the newly allocated node. The proc structure pointer of the node is updated with the pointer to the current process' process structure. Further, chan variable in the process structure is updated with the address of the newly created node i.e., conditional variable value. Now the state of this process is changed to SLEEPING and returned.
+
+9)cv_signal:
+  When a cv_signal is issued with the conditional variable, first the process in the process pointer in the node is checked for the chan. If the chan value matches with the Conditional variable value(address of the first element of the list) then that process' state is made RUNNABLE and the conditional variable is moved out the list thus making the next element as the head of the list.(This is basically a LIFO structure)

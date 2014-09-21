@@ -1,0 +1,7 @@
+all: hello
+
+hello: mem.c main.c
+	gcc -c -fpic mem.c
+	gcc -shared -o libmem.so mem.o
+	gcc -g -ggdb -L. -lmem -o main main.c
+

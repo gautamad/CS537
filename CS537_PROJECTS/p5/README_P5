@@ -1,0 +1,35 @@
+Teamm Members:
+Dineshbabu Selvaraju (dineshba@cs.wisc.edu)
+Gautam Dhanabalan (dhanabal@cs.wisc.edu)
+
+
+Network File Server:
+
+In this project we implemented a network file system with log structured implementation.  The client issues multiple requests to the server to read update the files on the file system. The server processes these requests and updates the fiel system in log structured format.
+
+A client library function was created so that any client could call those funtions in the library to access the file system.
+MFS_Init library function initailized the port address and host server the client wishes to communicate to.
+MFS_Creat function creates a file or a directory in th file system. All the updates take place at the end of the log.
+MFS_Write function writes data to the file in the file system. It updates the inode and imap data structures once write is done.
+MFS_Read funciton reads a block from file.
+MFS_Lookup function searches for a file or a directory in the parent directory and returns the inode number is found.
+MFS_Stat function gives information about the file such as size and type of the file (regular file or directory)
+MFS_Unlink funciton removes a file or directory from parent direcotry entry.
+MFS_Shutdown function closes the server by calling exit(0).
+
+
+
+Project 5b: File System Integrity
+
+1) Modified existing file structure to include a new storage type. In other words, a file with checksum error check data. Changes in fcntl.h, fs.c, file.h, sys_file.c etc.,
+
+2) Changes were made in readi and writei to perform the following functionalities:
+   
+	i) For checksum type of files, last 3 bytes of the address from the inode is considered valid since the higher byte is checksum.
+	
+	ii)During write, Checksum was written/updated for each block.
+
+	iii)During Read, existing checksum from inode is checked with a checksum calculated using the read data. If checksums do not match, then -1 is returned else read data is returned.
+
+3) stat structure is modified to include checksum values so that when stat system call is called, details of the file are displayed including the checksum(calculated for the entire file by bytewise XORing).
+
